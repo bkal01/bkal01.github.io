@@ -1,0 +1,76 @@
+<style>
+.md-content table {
+  width: fit-content;
+  margin: 0 auto;
+}
+
+.md-content figure > figcaption {
+  text-align: center;
+  color: var(--secondary);
+  font-size: 0.85em;
+  font-weight: normal;
+  margin-top: 0.4em;
+}
+
+.post-content {
+  counter-reset: sidenote;
+}
+
+.sidenote-ref {
+  counter-increment: sidenote;
+}
+
+.sidenote-ref::after {
+  content: counter(sidenote);
+  font-size: 0.65em;
+  font-weight: bold;
+  vertical-align: super;
+  line-height: 0;
+  color: var(--secondary);
+}
+
+.sidenote {
+  float: right;
+  clear: right;
+  margin-right: -280px;
+  width: 240px;
+  font-size: 0.8em;
+  line-height: 1.5;
+  color: var(--secondary);
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--border);
+}
+
+.sidenote::before {
+  content: counter(sidenote) ". ";
+  font-weight: bold;
+}
+
+@media (max-width: 1350px) {
+  .sidenote {
+    float: none;
+    display: block;
+    width: auto;
+    margin: 0.75em 0;
+    padding: 6px 12px;
+    border-left: 3px solid var(--border);
+  }
+
+  .sidenote::before {
+    display: inline;
+  }
+}
+</style>
+
+{{ if .Params.math }}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {
+        delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ]
+    });">
+</script>
+{{ end }}
