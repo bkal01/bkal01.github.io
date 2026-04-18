@@ -1,0 +1,17 @@
+baseURL = 'https://bkal01.github.io/'
+languageCode = 'en-us'
+title = 'Bhavesh Kalisetti'
+theme = 'PaperMod'
+
+[params]
+  ShowReadingTime = true
+  ShowPostNavLinks = true
+  ShowBreadCrumbs = true
+  ShowCodeCopyButtons = true
+
+[menu]
+  [[menu.main]]
+    identifier = "posts"
+    name = "Posts"
+    url = "/posts/"
+    weight = 10
