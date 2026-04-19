@@ -9,6 +9,19 @@ theme = 'PaperMod'
   ShowBreadCrumbs = true
   ShowCodeCopyButtons = true
 
+  [params.homeInfoParams]
+    Title = "Hi! I'm Bhavesh."
+    Content = """
+I'm currently an engineer at [Samsara](https://www.samsara.com) and previously studied [computer science at UC Berkeley](https://met.berkeley.edu/).
+
+At the moment, I'm very interested in:
+- efficient VLM inference
+- scaling models to process long video data
+- teaching coding agents to see
+
+You can reach me on [X](https://x.com/bkalisetti01) or my email bhaveshkalisetti@gmail.com.
+"""
+
 [menu]
   [[menu.main]]
     identifier = "posts"
