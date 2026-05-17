@@ -1,13 +1,13 @@
 ---
 title: "Norm Discrepancies in Your VLM Are Probably Fine"
-date: 2026-05-05
+date: 2026-05-17
 draft: false
 math: true
 ---
 
-Recently I was helping train a VLM from scratch and I noticed something odd: during training, the output norms of the projector exploded up to two orders of magnitude higher than the norms of text token embeddings:
+Recently I was helping train a VLM from scratch and I noticed something odd: during training, the output norms of the projector{{< sidenote >}}The projector is the component of a VLM that transforms the patch embeddings outputted by the vision encoder to token embeddings consumable by the LLM.{{< /sidenote >}} exploded up to two orders of magnitude higher than the norms of text token embeddings:
 
-![Projector mean output norm over the course of alignment training.](/images/vlm-norms/training_curve.png)
+![Projector mean output norm over the course of vision-language alignment training. The norm magnitude rises to roughly two orders of magnitude higher than the text token embedding norms.](/images/vlm-norms/training_curve.png)
 
 I thought this would be problematic for the VLM given normalization and the residual streams. In a standard pre-norm transformer block:
 
@@ -16,7 +16,7 @@ $$h = \text{MLP}(\text{Norm}(h)) + h$$
 
 we add unnormalized residual streams back into the outputs of self attention/MLP blocks, and the sum then gets normalized.
 
-For a VLM, $h = h_v || h_t$, where $h_v$ is the vision token representations, $h_t$ is the text token representations, and  $||$ denotes the concatenation operator. Let's say $||h_v|| \gg ||h_t||$. Then when we normalize (per token) the output of self attention/MLP $o_v$ (which we assume has reasonable norms) and $h_v$ for the vision tokens we get:
+For a VLM, $h = h_v \oplus h_t$, where $h_v$ is the vision token representations, $h_t$ is the text token representations, and  $\oplus$ denotes the concatenation operator. Let's say $||h_v|| \gg ||h_t||$. Then when we normalize (per token) the combination of self attention/MLP output $o_v$ (which we assume has reasonable norms) and $h_v$ we get:
 
 $$\text{Norm}(o_v + h_v) \approx \text{Norm}(h_v)$$
 
@@ -39,7 +39,7 @@ Given my limited compute, I want to try asking a more targeted, inference-time q
 
 For models, I'll be using [`SmolVLM2-2.2B-Instruct`](https://huggingface.co/HuggingFaceTB/SmolVLM2-2.2B-Instruct) and [`Qwen3-VL-2B-Instruct`](https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct). The models have similar sizes, have pre-norm transformer layers in their LLM backbone, but differ in their projector architectures: SmolVLM2 uses a simple [Pixel Shuffle + MLP](https://github.com/huggingface/transformers/blob/a553395766001116a719c82870171f8d6b458c98/src/transformers/models/smolvlm/modeling_smolvlm.py#L418), while Qwen3-VL opts for [explicit normalization in the projector](https://github.com/huggingface/transformers/blob/a553395766001116a719c82870171f8d6b458c98/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L108). Note that this normalization is not the final step in the projector, so there's no guarantee that outputs are normalized.
 
-We'll run these models on [DatBench](https://huggingface.co/datasets/DatologyAI/DatBench) from DatologyAI, which is a curated subset of various vision benchmarks with improved quality. Notably, the folks at DatologyAI discovered that many vision benchmarks are *blindly solvable* and built DatBench to prevent this. There's 9 different categories of tasks (e.g. spatial, counting, etc.), and we'll look at 10 samples from each -> 80 samples total{{< sidenote >}}We omit the math subset as it typically relies on LLM-as-a-judge for correctness checks{{< /sidenote >}}, just enough to average out any noise in our measurements.
+We'll run these models on [DatBench](https://huggingface.co/datasets/DatologyAI/DatBench) from DatologyAI, which is a curated subset of various vision benchmarks with improved quality. Notably, the folks at DatologyAI discovered that many vision benchmarks are solvable without looking at the image and built DatBench to prevent this. There's 9 different categories of tasks (e.g. spatial, counting, etc.), and we'll look at 10 samples from each -> 80 samples total{{< sidenote >}}We omit the math subset as it typically relies on LLM-as-a-judge for correctness checks.{{< /sidenote >}}, just enough to average out any noise in our measurements.
 
 For each model, on each sample, we'll measure the following metrics per token to track its trajectory:
 - $L_2$-norm of hidden states
@@ -70,40 +70,39 @@ We replicate previous works' findings in modern VLMs, showing that a norm mismat
 The fact that it has persisted across multiple generations of a variety of models suggests that it's either intentional or not harmful enough to warrant fixing.
 
 ## Observation 2: High Norms Dilute Vision Token Updates
-![Cosine similarlity to layer 0 as compared to an isotropic baseline (the dashed line).](/images/vlm-norms/isotropic.png)
+![Cosine similarlity to layer 0 per model/modality. In both models, vision tokens rotate much slower than text tokens. This is directly the consequence of Observation 1: due to higher norms, the same update vector has a smaller impact on vision tokens, causing them to have a "representational inertia".](/images/vlm-norms/obs_2.png)
 
 The figure above tracks the cosine similarity of hidden states to their initial representation as they pass through model layers. There's a stark difference between vision and text here.Vision tokens slowly rotate away from $h_0$ and still maintain some directional similarity by the end of prefill two dozen layers later. On the other hand, text tokens lose their initial direction immediately, becoming orthogonal to $h_0$ after a single layer. Why is this the case? Why are vision tokens more directionally stable than text tokens?
 
-This should be obvious: vision tokens have much higher $||h_0||$ and we've seen earlier that text/vision have roughly similar absolute update magnitudes, at least early on. So relatively, their vision updates are smaller and they simply can't change direction as quickly.  The high norms *dilute* updates for vision tokens. Quantitatively, we see the following table:
+This should be obvious: vision tokens have much higher $||h_0||$ and we've seen earlier that text/vision have roughly similar absolute update magnitudes, at least early on. So relatively, their vision updates are smaller and they simply can't change direction as quickly.  The high norms *dilute* updates for vision tokens. Quantitatively, we see in the following table:
 
-| Model    | Modality | $\frac{\lVert u_1\rVert}{\lVert h_0\rVert}$ | $\cos(h_1,h_0)$ | $\cos(u_1, h_0)$ |
-| -------- | -------- | ------------------------- | --------------- | ---------------- |
-| SmolVLM2 | Vision   | 0.29                      | 0.97            | 0.32             |
-| SmolVLM2 | Text     | 5.02                      | 0.17            | -0.06            |
-| Qwen3-VL | Vision   | 1.91                      | 0.63            | 0.24             |
-| Qwen3-VL | Text     | 10.01                     | 0.05            | -0.05            |
+| Model    | Modality | $\frac{\lVert u_1\rVert}{\lVert h_0\rVert}$ | $\cos(h_1,h_0)$ |
+| -------- | -------- | ------------------------- | --------------- |
+| SmolVLM2 | Vision   | 0.29                      | 0.97            |
+| SmolVLM2 | Text     | 5.02                      | 0.17            |
+| Qwen3-VL | Vision   | 1.91                      | 0.63            |
+| Qwen3-VL | Text     | 10.01                     | 0.05            |
 
 the relative magnitude of the updates for text are much larger than for vision. This is exactly the asymmetric update magnitude problem pointed out by Li et al., which affects how strongly these modalities can attend to each other.
 
-We can also do an interesting isotropic analysis: given our measured relative update vector magnitudes, what would the cosine similarity from each hidden state to layer 0 look like if each update direction was isotropic{{< sidenote >}}Isotropic here means update directions are uniformly random.{{< /sidenote >}} with respect to the previous residual? That's what the dashed line in the figure represents, it's a reference curve as to what uninformative updates would look like. We are interested in the behavior of the observed cosine similarity relative to the null. Clearly for text, the observed is below null and the cosine similarity falls *faster* than under isotropic directions. This implies that the update vectors are structured in such a way that the token representations rotate *away* from the initial direction. Meanwhile, vision tokens tend to be near and even above the null, at least early on. The two modalities also differ in terms of how they update from $h_0$: for vision it is mostly via small relative steps, for text it is via updates with directions further away than the isotropic construction.
-
 ## Ablation 1: Modifying Image Content
-![Hidden state norms and cosine similarity to layer 0 for text tokens, in both the multimodal and text-only settings.](/images/vlm-norms/blank_text_only.png)
 
-As an additional ablation, we test whether the presence of vision tokens affects how the VLM processes text. We run the same prompts through the VLM but with two modifications:
+Despite vision tokens entering the LLM with an order of magnitude higher norms, they actually have approximately zero effect on the residual stream trajectory of text tokens during prefill. To show this, we can run the same prompts through the VLM but with two modifications:
 1. We replace the image with a blank white image of the same size.
 2. We remove the image altogether
 
-We compare hidden state norms/cosine similarity per layer with these modifications.{{< sidenote >}}One caveat here is that when we remove vision tokens, the sequence length changes. This is technically a confounding factor for our ablation because a different sequence length means different positional encodings per token and a reduced softmax width.{{< /sidenote >}} We can compute the correlation coefficient averaged across samples:
+We compare hidden state norms/cosine similarity per layer with these modifications.{{< sidenote >}}One caveat here is that when we remove the input image, the sequence length changes. This is technically a confounding factor for our ablation because a different sequence length means different positional encodings per token and a reduced softmax width.{{< /sidenote >}} We can compute the correlation coefficient averaged across samples:
+
+![Hidden state norms and cosine similarity to layer 0 for text tokens in three different settings: multimodal inputs with real images, multimodal inputs with blank images, and text-only inputs. In all three settings, the curves show nearly identical patterns, indicating that the presence of vision tokens and their content actually have very little influence on the statistical trajectory of text tokens.](/images/vlm-norms/blank_text_only.png)
 
 | Model    | Real-Blank Norms corr coeff | Real-Blank Cosine corr coeff | Real-Text Norms corr coeff | Real-Text Cosine corr coeff |
 | -------- | ---------------- | ----------------- | ---------------- | ----------------- |
 | SmolVLM2 | 0.9999           | 0.9999            | 0.9927           | 0.9999            |
 | Qwen3-VL | 1.0000           | 1.0000            | 0.9999           | 0.9999            |
 
-The correlation is extremely high, and we can clearly see from the figure that aside from the early layers of SmolVLM2, the text tokens have nearly identical norms/cosine similarities to the initial embedding, regardless of our modification. Despite vision tokens entering the LLM with an order of magnitude higher norms, they have approximately zero effect on the residual stream trajectory of text tokens during prefill.
+The correlation is extremely high, and we can clearly see from the figure that aside from the early layers of SmolVLM2, the text tokens have nearly identical norms/cosine similarities to the initial embedding, regardless of our modification.
 
-So far we've seen that vision tokens enter big and move slowly, verifying prior works' observations on their stability (Fan et al.) or sluggishness (Li et al.). We've also seen how modifying the image content of a prompt has little impact on the prompt text trajectories. However, the remaining open question is "what purpose does this slow residual stream serve?" To answer this question, we'll need to *intervene* at inference-time and probe model behavior.
+So far we've seen that vision tokens enter big and move slowly, verifying prior works' observations on their stability (Fan et al.) or sluggishness (Li et al.). We've also seen how modifying the image content of a prompt has little impact on the prompt text trajectories. However, the remaining open question is "what role does this slow residual stream play during generation?" To answer this question, we'll need to *intervene* at inference-time and probe model behavior.
 
 # Probing the Norm Discrepancy
 
@@ -114,7 +113,11 @@ We adopt the same intervention as Fan et al., scaling down norms by a constant m
 $$ \tilde{h}_v = \alpha\cdot \text{Projector}(v) $$
 $$ \alpha \in \{0.01, 0.03, 0.05, 0.07, 0.1, 0.3, 1.0, 3.0\} $$
 
-We sweep over a range of $\alpha$, including testing what happens when we make norms larger. For each $\alpha$, we measure:
+We sweep over a range of $\alpha$, including testing what happens when we make norms larger. The goal is to answer:
+
+> "How sensitive is model behavior to the scale of vision token inputs?"
+
+For each $\alpha$, we measure:
 
 - output logit distribution
 - attention mass distribution over vision tokens
@@ -122,9 +125,9 @@ We sweep over a range of $\alpha$, including testing what happens when we make n
 
 To see how much model behavior changes, we can compute the KL divergence from the baseline of our two measured probability distributions, as well as the median rank of the baseline selected token in the modified model.
 
-![Vision attention mass KL and output logit KL as a function of $\alpha$, per model. As $\alpha$ moves away from the baseline (1.0), KL rises, indicating that the model's behavior (in terms of which tokens it attends to and which tokens it outputs) change significantly, even at a matched-norm scale.](/images/vlm-norms/kl_vs_alpha.png)
+![Vision attention mass KL and output logit KL as a function of $\alpha$, per model. As $\alpha$ moves away from the baseline (1.0), KL rises, indicating that the model's behavior (in terms of which tokens it attends to and which tokens it outputs) change significantly, even when we pick $\alpha$ to match vision and text norms.](/images/vlm-norms/kl_vs_alpha.png)
 
-| Model | $\alpha$ | Norm Ratio | Attention KL | Logit KL | Median Rank |
+| Model | $\alpha$ | Vision/Text Norm Ratio | Attention KL | Logit KL | Median Rank |
 | --- | --- | --- | --- | --- | --- |
 | SmolVLM2 | 0.05 | 1.04 | 1.55 | 6.05 | 3.0 |
 | Qwen3-VL | 0.07 | 1.07 | 2.18 | 19.77 | 149.0 |
@@ -138,7 +141,7 @@ We dig further into how inference-time downscaling affects model behavior by ana
 $$ K_v = W_K \cdot \text{Norm}(h_v) $$
 $$ V_v = W_V \cdot \text{Norm}(h_v) $$
 
-We know that despite pre-normalization, scale affects what $W_K, W_V$ operate on in all layers but the first due to the residual stream. The question we ask in this experiment is:
+Even though every attention block is preceded by normalization, the residual stream propagates scale across layers. By layer 2 onward, the pre-norm input still carries the high norm signal. The question we ask in this experiment is:
 
 > "How robust are $W_K$ and $W_V$ to out-of-distribution inputs?"
 
