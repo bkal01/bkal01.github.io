@@ -72,7 +72,7 @@ The fact that it has persisted across multiple generations of a variety of model
 ## Observation 2: High Norms Dilute Vision Token Updates
 ![Cosine similarlity to layer 0 per model/modality. In both models, vision tokens rotate much slower than text tokens. This is directly the consequence of Observation 1: due to higher norms, the same update vector has a smaller impact on vision tokens, causing them to have a "representational inertia".](/images/vlm-norms/obs_2.png)
 
-The figure above tracks the cosine similarity of hidden states to their initial representation as they pass through model layers. There's a stark difference between vision and text here.Vision tokens slowly rotate away from $h_0$ and still maintain some directional similarity by the end of prefill two dozen layers later. On the other hand, text tokens lose their initial direction immediately, becoming orthogonal to $h_0$ after a single layer. Why is this the case? Why are vision tokens more directionally stable than text tokens?
+The figure above tracks the cosine similarity of hidden states to their initial representation as they pass through model layers. There's a stark difference between vision and text here. Vision tokens slowly rotate away from $h_0$ and still maintain some directional similarity by the end of prefill two dozen layers later. On the other hand, text tokens lose their initial direction immediately, becoming orthogonal to $h_0$ after a single layer. Why is this the case? Why are vision tokens more directionally stable than text tokens?
 
 This should be obvious: vision tokens have much higher $||h_0||$ and we've seen earlier that text/vision have roughly similar absolute update magnitudes, at least early on. So relatively, their vision updates are smaller and they simply can't change direction as quickly.  The high norms *dilute* updates for vision tokens. Quantitatively, we see in the following table:
 
@@ -145,16 +145,16 @@ Even though every attention block is preceded by normalization, the residual str
 
 > "How robust are $W_K$ and $W_V$ to out-of-distribution inputs?"
 
-At different $\alpha$, if the projected keys and value $K', V'$ are *far* from the their original values $K, V$ without scaling, then we can say that the projection matrices are sensitive to the scale of the input.
+At different $\alpha$, if the projected keys and value $K^{\prime}, V^{\prime}$ are *far* from the their original values $K, V$ without scaling, then we can say that the projection matrices are sensitive to the scale of the input.
 
 ![Cosine similarity of new projected keys/values to original keys/values per-model, across a sweep of $\alpha$. Keys maintain much higher directional similarity with the baseline compared to values. This implies that while $W_K$ sits in relatively scale-stable directions, $W_V$ does not. The disruption of inference-time scaling appears in the visual *values*, meaning the model functionally reads "garbage" out of its KV cache despite knowing where to look.](/images/vlm-norms/kv_stability.png)
 
-| Model | $\alpha$ | $\cos(K', K)$ | $\cos(V', V)$ |
+| Model | $\alpha$ | $\cos(K^{\prime}, K)$ | $\cos(V^{\prime}, V)$ |
 | --- | --- | --- | --- |
 | SmolVLM2 | 0.01 | 0.825 | 0.151 |
 | Qwen3-VL | 0.01 | 0.657 | 0.127 |
 
-As shown in the figure/table, after scaling norms down by 0.01x the projected keys retain a lot of directional similarity with the original keys ($\cos(K', K) = 0.825$ for SmolVLM2). However, the projected values lose almost all directional similarity. So the token positions that a generated token attends to survive downscaling, but the visual content itself collapses. This tells us that $W_K$ and $W_V$ actually differ in their sensitivity: $W_K$ can handle input perturbation fairly well while $W_V$ cannot.
+As shown in the figure/table, after scaling norms down by 0.01x the projected keys retain a lot of directional similarity with the original keys ($\cos(K^{\prime}, K) = 0.825$ for SmolVLM2). However, the projected values lose almost all directional similarity. So the token positions that a generated token attends to survive downscaling, but the visual content itself collapses. This tells us that $W_K$ and $W_V$ actually differ in their sensitivity: $W_K$ can handle input perturbation fairly well while $W_V$ cannot.
 
 ## Experiment 3: KV Cache Substitution
 
