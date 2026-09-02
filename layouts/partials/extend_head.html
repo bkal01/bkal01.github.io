@@ -60,6 +60,18 @@
     display: inline;
   }
 }
+
+.tldr {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+}
+
+.tldr p:last-child {
+  margin-bottom: 0;
+}
 </style>
 
 {{ if .Params.math }}

@@ -22,6 +22,17 @@ At the moment, I'm very interested in:
 You can reach me on [X](https://x.com/bkalisetti01) or by email at bhaveshkalisetti [at] gmail [dot] com.
 """
 
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+    [markup.goldmark.extensions]
+      [markup.goldmark.extensions.passthrough]
+        enable = true
+        [markup.goldmark.extensions.passthrough.delimiters]
+          block = [['$$', '$$']]
+          inline = [['$', '$']]
+
 [menu]
   [[menu.main]]
     identifier = "posts"
